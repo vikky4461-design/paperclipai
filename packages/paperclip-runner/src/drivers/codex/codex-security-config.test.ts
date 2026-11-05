@@ -6,6 +6,7 @@ import { evalProviderTransportOptions } from "../../cli/eval-provider-runtime.js
 import { describe, expect, it } from "vitest";
 
 import {
+  CODEX_UPDATE_PLAN_TOOL_CONFIG,
   codexExecutableReadOnlyRoots,
   codexNetworkReadOnlyRoots,
   createIsolatedCodexAppServerArgs,
@@ -14,6 +15,17 @@ import {
 } from "./codex-security-config.js";
 
 describe("Codex security configuration", () => {
+  it("enables the update_plan checklist tool before policy overrides and the app-server subcommand", () => {
+    for (const disableWebSearch of [false, true]) {
+      const args = createIsolatedCodexAppServerArgs({ HOME: "/host/home" }, [], undefined, [], disableWebSearch);
+      const index = args.indexOf(CODEX_UPDATE_PLAN_TOOL_CONFIG);
+      expect(args[index - 1]).toBe("-c");
+      expect(index).toBeLessThan(args.indexOf("app-server"));
+      expect(args.at(-1)).toBe("app-server");
+      if (disableWebSearch) expect(args.slice(-3, -1)).toEqual(["-c", 'web_search="disabled"']);
+    }
+  });
+
   it("uses the same actual pinned executable for native defaults and direct evals without a global Codex PATH", () => {
     const command = resolvePinnedCodexCommand();
     expect(evalProviderTransportOptions("codex").codexCommand).toBe(command);
@@ -242,6 +254,18 @@ describe("Codex security configuration", () => {
       "--input-type=module", "--eval", source,
     ], { env: { ...process.env, NODE_PATH: "", NODE_OPTIONS: "" }, encoding: "utf8", timeout: 10_000,
       maxBuffer: 32 * 1024 })).toBe("PINNED_CODEX_ISOLATION_VERIFIED");
+  });
+
+  it("uses the execution account's HOME without credential deny roots in preconfigured mode", () => {
+    const source = { HOME: "/users/executor", CODEX_HOME: "/users/executor/.codex", PAPERCLIP_RUNNER_HOME_MODE: "preconfigured" };
+    const args = createIsolatedCodexAppServerArgs(source).join("\n");
+    expect(args).not.toContain('"/users/executor"="none"');
+    expect(args).not.toContain('"/users/executor/.codex"="none"');
+    expect(args).toContain('HOME="/users/executor"');
+    expect(args).toContain('"/users/executor"="write"');
+    expect(createSecuredCodexThreadParams("/workspace", "default", true, true, source).config).toEqual({
+      "skills.include_instructions": true, include_collaboration_mode_instructions: true,
+    });
   });
 
   it("allows only the registered private instruction directory while keeping shared context read-only", () => {

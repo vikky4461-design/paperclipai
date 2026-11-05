@@ -1,7 +1,7 @@
 import type { heartbeatRuns } from "@paperclipai/db";
 
 type Run = Pick<typeof heartbeatRuns.$inferSelect, "status" | "startedAt" | "finishedAt" | "runtimeMode" | "errorCode" | "error" | "resultJson">;
-const SOURCES = ["operator", "queued_message", "shutdown", "provider", "transport", "control_plane", "unknown"] as const;
+const SOURCES = ["operator", "queued_message", "shutdown", "provider", "transport", "control_plane", "controller_lease", "unknown"] as const;
 export type CancellationSource = typeof SOURCES[number];
 export interface RunCancellation {
   source: CancellationSource;
@@ -39,6 +39,63 @@ export function requestedRunCancellation(result: Run["resultJson"], reason: stri
   }, reason: reason.slice(0, 512), recordedAt: new Date().toISOString() };
 }
 
+const LEGACY_CONTROLLER_LEASE_LOSS_CAUSES = ["renewal_rejected", "renewal_deadline", "renewal_error"] as const;
+export type LegacyControllerLeaseLossCause = typeof LEGACY_CONTROLLER_LEASE_LOSS_CAUSES[number];
+const controllerLeaseLossReason = (cause: LegacyControllerLeaseLossCause) => `Legacy controller lease lost (${cause})`;
+
+/** The host aborted its own adapter after losing durable run ownership. */
+export function controllerLeaseLossCancellation(cause: LegacyControllerLeaseLossCause): RunCancellation {
+  return { source: "controller_lease", expected: false, initiator: { type: "system" },
+    reason: controllerLeaseLossReason(cause), recordedAt: new Date().toISOString() };
+}
+
+/** Closed cause label for diagnostics; only the server-written reason matches. */
+export function readControllerLeaseLossCause(cancellation: RunCancellation): LegacyControllerLeaseLossCause | null {
+  if (cancellation.source !== "controller_lease") return null;
+  return LEGACY_CONTROLLER_LEASE_LOSS_CAUSES.find(cause => cancellation.reason === controllerLeaseLossReason(cause)) ?? null;
+}
+
+/** Watchdog timings at the moment the lease was lost, in milliseconds. */
+export interface LegacyControllerLeaseLossTiming {
+  sinceRenewalMs: number;
+  renewalPendingMs: number | null;
+  deadlineLateMs: number | null;
+  renewalCount: number;
+}
+/** Read-side record: a `null` timing is dropped, so every present timing is a number. */
+export type LegacyControllerLeaseLoss = { cause: LegacyControllerLeaseLossCause }
+  & Partial<Record<keyof LegacyControllerLeaseLossTiming, number>>;
+
+const MAX_LEASE_LOSS_TIMING = 86_400_000;
+const leaseLossTimingValue = (value: unknown) =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.min(Math.round(value), MAX_LEASE_LOSS_TIMING) : undefined;
+
+/** Closed cause and bounded counters only; unknown keys and values are dropped. */
+export function readControllerLeaseLoss(value: unknown): LegacyControllerLeaseLoss | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const cause = LEGACY_CONTROLLER_LEASE_LOSS_CAUSES.find(label => label === record.cause);
+  if (!cause) return null;
+  const loss: LegacyControllerLeaseLoss = { cause };
+  for (const field of ["sinceRenewalMs", "renewalPendingMs", "deadlineLateMs", "renewalCount"] as const) {
+    const timing = leaseLossTimingValue(record[field]);
+    if (timing !== undefined) loss[field] = timing;
+  }
+  return loss;
+}
+
+/** A queue admission wait has no provider attempt to retry. Historical rows can
+ * carry unknown cancellation provenance, so use the queue's original receipt. */
+export function isQueuedDependencyWait(run: Pick<Run, "status" | "errorCode" | "resultJson"> & Partial<Pick<Run, "runtimeMode" | "startedAt">>): boolean {
+  const source = run.resultJson?.timeoutSource;
+  const queueReceipt = (source === "dependency_gate" && run.runtimeMode === "legacy") ||
+    (source === "stale_queued_run_gate" && (run.runtimeMode === "legacy" || run.runtimeMode === "native"));
+  return run.status === "cancelled" && queueReceipt && run.startedAt === null &&
+    run.errorCode === "issue_dependencies_blocked" && run.resultJson?.stopReason === run.errorCode &&
+    run.resultJson?.timeoutFired !== true;
+}
+
 /** Preserve recorded stop intent when adapter completion replaces resultJson. */
 export function cancellationResultJson(run: Run, status: string, patch?: Run["resultJson"], errorCode?: string | null, error?: string | null): Run["resultJson"] {
   if (status !== "cancelled" && status !== "interrupted") return patch ?? run.resultJson;
@@ -47,7 +104,9 @@ export function cancellationResultJson(run: Run, status: string, patch?: Run["re
   let cancellation = previous?.expected ? previous : readRunCancellation(patch) ?? previous;
   const code = errorCode ?? run.errorCode;
   if (!cancellation) {
-    if (code === "server_shutdown_interrupted") {
+    if (isQueuedDependencyWait({ ...run, status, errorCode: code, resultJson: result })) {
+      cancellation = requestedRunCancellation(result, "Waiting for task dependencies to resolve");
+    } else if (code === "server_shutdown_interrupted") {
       cancellation = { source: "shutdown", expected: true, initiator: { type: "system" },
         reason: "Server shutdown interrupted execution", recordedAt: new Date().toISOString() };
     } else if (result.cancelledByActorType || result.cancelledByUserId || result.interruptedByActorType || result.queuedCommentInterruptQueueId) {
