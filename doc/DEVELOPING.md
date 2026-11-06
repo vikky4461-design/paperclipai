@@ -554,8 +554,7 @@ views. The plus button opens the existing agent picker; adding an agent creates
 one sidebar entry, and choosing them again reopens the same conversation. The
 **Add and reopen** component story exercises that constraint. Agent selection
 and sending use local fixtures. The live `/chats` and `/chats/:agentRef` routes
-use the same sidebar, picker, landing page, and existing chat surface when the
-Agent Chat experimental setting is enabled.
+use the same sidebar, picker, landing page, and existing chat surface for everyone.
 
 Use **Chat & Comments → Issue Thread Interactions → Composer Questions Auto Advance**
 to try the paged composer form. A single selection shows a brief checked-state animation before advancing to the
@@ -1931,6 +1930,29 @@ corrupt, or unbound sources block the import. Publication still requires an
 independent download and restore of the new encrypted snapshot. The old folder
 remains absent, and the importer does not change the original restore point.
 
+An interrupted archived Git import reuses its original uploaded archive after
+authentication, including when the upload reply was lost. It does not rebuild
+that archive from today's remote branch pointers. The original import journal,
+restoration recipe, task binding, and execution fences must still match before
+publication. Saved nested sources must still belong to the same company and
+project with the same repository URL; publication locks and rechecks those source
+rows. Imports from mutable local folders still recapture and compare the
+current files; a saved upload does not permit later local edits to be discarded.
+
+When the verified Git source still exists, reconstruction also copies its local
+`info/exclude` rules into the private repository before applying a saved restore
+point. This keeps saved ignored files, including recovery receipts and bundles,
+in their original classification. The source ignore file stays unchanged.
+Symlinked, oversized, or changing source ignore files block reconstruction.
+
+Archived imports restore nested linked checkouts as private standalone
+repositories. The saved branch name belongs to the old path, so reconstruction
+does not register a new worktree or reset a branch in the shared project cache.
+A verified cache can supply Git objects without copying its current working
+files. Each private copy retains the restore point's extra commits under local
+refs so they survive portable archive capture and garbage collection. Ordinary
+linked-worktree recovery still requires its original path ownership.
+
 Shared physical folders require Cloud's offline enrollment maintenance process.
 A task-level hold cannot fence another workspace record pointing at the same
 folder. Maintenance verifies that legacy deployments have stopped and that no
@@ -2895,8 +2917,7 @@ and `deny-all` options. Codex conversion keeps a non-empty model and
 otherwise stores the shared `gpt-5.6-sol` default. The native execution boundary
 applies the same default to older runner rows whose model is missing or blank.
 
-For an Agent Chat test drive, enable **Agent Chat** in Experimental settings and
-configure two agents with Paperclip Runner: native Codex and ACPX Claude. Connect
+For an Agent Chat test drive, configure two agents with Paperclip Runner: native Codex and ACPX Claude. Connect
 the Claude account through the agent's **AI connection** section (or supply an
 explicit supported provider credential); an ambient Claude CLI login alone is
 not a credential source for its isolated runner home. The default
@@ -4590,3 +4611,14 @@ A restored task shows its header and properties while uncached history is still 
 Query-cache cleanup snapshots storage keys before deletion because native storage can reorder them as records are removed. Flush cleanup affects only its owning account and yields if another account becomes active.
 
 Run `pnpm exec playwright test -c tests/e2e/playwright.config.ts tests/e2e/disconnect-resilience.spec.ts` for the built-UI outage regressions. The suite uses fresh isolated local data, 20-second API interceptions, and a controlled sign-out session response. It covers retained tasks, comment and document recovery, queued-comment reloads, cached settings/sidebar/task reads, legacy Inbox reloads, real error status handling and sign-out clearing across several company records. The existing CI e2e shards discover it automatically. A real hosted restart or deploy remains a separate acceptance check.
+
+### Chat and task navigation caching
+
+Task-link intent warms the compact core and recent-comments queries used by the
+thread, rather than fetching full enrichment and an unused older-history page.
+Classic and already-expanded tasks keep their full-history prefetch.
+The mounted reads reuse the normal 30-second freshness window; live invalidation
+and background revalidation still apply. Recent-window catch-up retains messages
+observed before navigation. Agent Chat can render from the current person's
+company-scoped navigation list, carrying its original fetch timestamp so stale
+conversations refresh in the background. No conversation is created by a read.

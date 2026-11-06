@@ -95,11 +95,18 @@ it("explains a persisted Retry wait without exposing the saved payload", () => {
     .toMatchObject({ state: "waiting_for_user", userAction: "resume" });
 });
 
-it.each(["cleanup_quarantined", "cancelled_by_operator"])("does not offer Retry for terminal Retry waits: %s", reason => {
+it.each(["cleanup_quarantined", "cancelled_by_operator", "retry_source_changed"])("does not offer Retry for terminal Retry waits: %s", reason => {
   const failed = { ...run, errorCode: "native_provider_terminal_failed", resultJson: null };
   expect(projectTaskInterruption(issue, { run: failed, agent, paused: false, approval: false,
     wait: { id: "retry", requestedAt: new Date(), sourceRunId: failed.id, executionWaitReason: reason } }))
     .toMatchObject({ state: "failed", canRetry: false, retryWait: { reason } });
+});
+
+it("keeps Retry for a Retry declined for its requester's access, since a new click replaces it", () => {
+  const failed = { ...run, errorCode: "native_provider_terminal_failed", resultJson: null };
+  expect(projectTaskInterruption(issue, { run: failed, agent, paused: false, approval: false,
+    wait: { id: "retry", requestedAt: new Date(), sourceRunId: failed.id, executionWaitReason: "retry_authority_denied" } }))
+    .toMatchObject({ state: "failed", canRetry: true, retryWait: { reason: "retry_authority_denied" } });
 });
 
 it("preserves the actual workspace preparation error without changing retry authority", () => {
@@ -257,5 +264,26 @@ describe("saved-work recovery step", () => {
   it("does not name a step for an ordinary scheduled retry", () => {
     expect(projectTaskInterruption(issue, { run: { ...failed, scheduledRetryAt: new Date(now + 30_000) }, agent,
       paused: false, approval: false }, now)).not.toHaveProperty("recoveryStep");
+  });
+});
+
+describe("scheduled resource wait presentation", () => {
+  const now = Date.parse("2026-01-01T12:00:00Z");
+  const waiting = { ...run, status: "scheduled_retry", errorCode: null, resultJson: null,
+    scheduledRetryReason: "workspace_busy", scheduledRetryAt: new Date(now - 60_000) };
+
+  it("keeps an overdue workspace wait out of the failed-attempt UI", () => {
+    expect(projectTaskInterruption(issue, { run: waiting, agent, paused: false, approval: false }, now))
+      .toMatchObject({ state: "working", canRetry: false });
+  });
+
+  it("keeps failure retries, user gates and failed Retry preparation authoritative", () => {
+    expect(projectTaskInterruption(issue, { run: { ...waiting, scheduledRetryReason: "transient_failure" },
+      agent, paused: false, approval: false }, now)).toMatchObject({ state: "failed", canRetry: true });
+    expect(projectTaskInterruption(issue, { run: waiting, agent, paused: true, approval: false }, now))
+      .toMatchObject({ state: "waiting_for_user", userAction: "resume" });
+    expect(projectTaskInterruption(issue, { run: waiting, agent, paused: false, approval: false,
+      retryWait: { id: "retry", sourceRunId: run.id, requestedAt: new Date(now), preparationStatus: "failed" } }, now))
+      .toMatchObject({ state: "failed", canRetry: true });
   });
 });

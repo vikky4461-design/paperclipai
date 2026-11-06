@@ -27,11 +27,13 @@ import { LegacyControllerLeaseLostError } from "../legacy-controller-lease.js";
 import { requestedRunCancellation } from "../run-cancellation.js";
 import { ProjectAccessDeniedError } from "../project-access-denial.js";
 import { RemoteWorkspaceOperationError, RemoteWorkspaceOperationTimeoutError, RemoteWorkspacePreparationTimeoutError, RemoteWorkspaceRestoreError } from "../remote-workspace-transport.js";
-import { EnvironmentRunError } from "../environment-run-orchestrator.js";
+import { EnvironmentRunError, environmentRunOrchestrator } from "../environment-run-orchestrator.js";
 import { ReusableSandboxResumeError } from "../reusable-sandbox-resume-error.js";
 import { PluginWorkerUnavailableError } from "../plugin-worker-unavailable-error.js";
-import { environmentTaskErrorCodeData, JsonRpcCallError, PluginEnvironmentTaskError } from "@paperclipai/plugin-sdk";
+import { environmentTaskErrorCodeData, JsonRpcCallError, PluginEnvironmentTaskError, PluginWorkspaceOperationError, workspaceOperationErrorData } from "@paperclipai/plugin-sdk";
 import { RUNNER_REVISION_MISMATCH_RETRY } from "../runner-revision-mismatch.js";
+import { workspaceProviderCallFailure } from "../workspace-provider-failure.js";
+import { logger } from "../../middleware/logger.js";
 import { unprocessable } from "../../errors.js";
 import { createHeartbeatLifecycle, type HeartbeatLifecycleDependencies } from "./run-lifecycle.js";
 import { createHeartbeatRunPreparation, ConfigurationIncompleteFailure, classifyManagedProjectAuthFailure } from "./run-preparation.js";
@@ -969,6 +971,44 @@ describe.skipIf(!support.supported && !process.env.PAPERCLIP_TEST_DATABASE_URL)(
     } else expect(f.deps.scheduleBoundedRetryForRun).not.toHaveBeenCalled();
   });
 
+  // Daytona returned HTTP 502 on sandbox create and cleanup of the
+  // provisional allocation could not be confirmed. The orchestrator wraps the
+  // worker refusal exactly as staging recorded it.
+  const daytonaCreate502 = (withEnvelope = true) => new JsonRpcCallError({ code: -32000,
+    message: "Daytona sandbox creation failed (HTTP 502); cleanup could not be confirmed for paperclip-create-05f81d77",
+    data: withEnvelope ? { schema: "paperclip/environment-creation-cleanup/v1", providerDiagnostic: { httpStatus: 502 },
+      cleanup: { providerLeaseId: "paperclip-create-05f81d77", companyId: "company", environmentId: "environment",
+        attemptId: "05f81d77", accountFingerprint: "a".repeat(64), labels: {} } } : undefined });
+  const acquireThroughOrchestrator = async (refusal: unknown) => {
+    const orchestrator = environmentRunOrchestrator(db, { environmentRuntime: {
+      acquireRunLease: async () => { throw refusal; },
+    } as never });
+    return orchestrator.acquireLease({ companyId: randomUUID(), environment: { id: randomUUID(), name: "Paperclip Sandbox", driver: "sandbox" } as never,
+      issueId: null, agentId: randomUUID(), heartbeatRunId: randomUUID(), persistedExecutionWorkspace: null,
+      executionWorkspaceSettings: null, adapterType: null }).then(() => { throw new Error("expected a refusal"); }, (error: unknown) => error);
+  };
+
+  it.each(["fresh", "started", "message_only", "permanent", "retained"] as const)("routes a %s sandbox provider lease refusal through bounded bootstrap recovery", async scenario => {
+    const f = await fixture({ runtimeMode: scenario === "retained" ? "native" : "legacy" });
+    const refusal = scenario === "message_only" ? daytonaCreate502(false)
+      : scenario === "permanent" ? new JsonRpcCallError({ code: -32000, message: "Daytona sandbox creation failed (HTTP 400)",
+        data: { schema: "paperclip/environment-acquire-error/v1", providerDiagnostic: { httpStatus: 400 } } })
+      : daytonaCreate502();
+    const error = await acquireThroughOrchestrator(refusal);
+    f.deps.scheduleBoundedRetryForRun.mockResolvedValueOnce({ outcome: "not_scheduled", reason: "Fixture scheduler boundary", issueId: null });
+    await f.completion.failRunSetup(f.setup(error, scenario === "started"));
+    const failed = await read(f.run.id);
+    const retried = scenario === "fresh";
+    expect(failed).toMatchObject({ status: "failed", errorCode: retried ? "environment_provider_unavailable" : "setup_failed" });
+    // The staging message is kept verbatim for diagnostics.
+    expect(failed.error).toContain("Daytona sandbox creation failed");
+    if (retried) {
+      expect(failed.resultJson).toMatchObject({ executionRecovery: { kind: "bootstrap", providerWorkStarted: false },
+        providerFailure: { provider: "sandbox", phase: "startup", category: "overloaded", httpStatus: 502, retryability: "transient" } });
+      expect(f.deps.scheduleBoundedRetryForRun).toHaveBeenCalledWith(expect.objectContaining({ id: f.run.id }), f.agent);
+    } else expect(f.deps.scheduleBoundedRetryForRun).not.toHaveBeenCalled();
+  });
+
   const runnerMismatch = () => new JsonRpcCallError({ code: -32002, message: "The installed Runner does not match the expected revision",
     data: environmentTaskErrorCodeData(new PluginEnvironmentTaskError("runner_revision_mismatch")) });
 
@@ -998,6 +1038,36 @@ describe.skipIf(!support.supported && !process.env.PAPERCLIP_TEST_DATABASE_URL)(
     expect(await read(f.run.id)).toMatchObject({ status: "failed", errorCode: "runner_revision_mismatch" });
     expect(f.deps.scheduleBoundedRetryForRun).toHaveBeenCalledWith(expect.objectContaining({ id: f.run.id }), f.agent, RUNNER_REVISION_MISMATCH_RETRY);
     expect(f.deps.scheduleInteractionContinuationInfrastructureRetryIfEligible).not.toHaveBeenCalled();
+  });
+
+  it("records a workspace provider's reason on the run and in the setup failure log without retrying", async () => {
+    const f = await fixture();
+    const logged = vi.spyOn(logger, "error");
+    onTestFinished(() => logged.mockRestore());
+    const rejection = new JsonRpcCallError({ code: -32002, message: "Invalid runtime computer connection",
+      data: workspaceOperationErrorData(new PluginWorkspaceOperationError("runtime_connection_invalid")) });
+    await f.completion.failRunSetup(f.setup(workspaceProviderCallFailure(rejection)));
+    const failed = await read(f.run.id);
+    expect(failed).toMatchObject({ status: "failed", errorCode: "setup_failed",
+      error: "The selected runtime's saved connection is invalid; reprovision the runtime before retrying",
+      resultJson: { workspaceProviderFailure: { kind: "provider", reason: "runtime_connection_invalid", retryable: false } } });
+    expect(JSON.stringify(failed)).not.toContain("Invalid runtime computer connection");
+    expect(f.deps.scheduleBoundedRetryForRun).not.toHaveBeenCalled();
+    const setupLog = logged.mock.calls.find(call => call[1] === "heartbeat execution setup failed");
+    expect(setupLog?.[0]).toMatchObject({ runId: f.run.id, errorCode: "setup_failed",
+      workspaceProviderFailure: { kind: "provider", reason: "runtime_connection_invalid", retryable: false } });
+  });
+
+  it("retries a workspace operation the stopped provider worker never received", async () => {
+    const f = await fixture();
+    const refusal = new PluginWorkerUnavailableError({ pluginId: "plugin-1", workerStatus: "stopped",
+      message: 'Cannot call "workspaceOperation" — worker for "plugin-1" is stopped' });
+    f.deps.scheduleBoundedRetryForRun.mockResolvedValueOnce({ outcome: "not_scheduled", reason: "Fixture scheduler boundary", issueId: null });
+    await f.completion.failRunSetup(f.setup(workspaceProviderCallFailure(refusal)));
+    expect(await read(f.run.id)).toMatchObject({ status: "failed", errorCode: "plugin_worker_unavailable",
+      error: "Workspace storage provider is not running; retry the same workspace",
+      resultJson: { workspaceProviderFailure: { kind: "worker_unavailable", reason: null, retryable: true } } });
+    expect(f.deps.scheduleBoundedRetryForRun).toHaveBeenCalledWith(expect.objectContaining({ id: f.run.id }), f.agent);
   });
 
   it("keeps a found project authentication conflict a configuration gap that blocks for the board", async () => {
