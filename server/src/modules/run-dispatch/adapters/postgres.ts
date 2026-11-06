@@ -325,8 +325,7 @@ export function createPostgresRunDispatchAdapter(
           eq(issueThreadInteractions.companyId, input.companyId),
           eq(issueThreadInteractions.issueId, input.issueId),
           eq(issueThreadInteractions.status, "pending"),
-          eq(
-            .addresseeAgentId, input.agentId),
+          eq(issueThreadInteractions.addresseeAgentId, input.agentId),
         ),
       )
       .limit(1);
