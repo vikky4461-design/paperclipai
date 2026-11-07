@@ -53,10 +53,23 @@ export function currentControllerBootId(): string {
   return bootId;
 }
 
+let resolvedProcessStartedAt: string | null = null;
+
 export async function currentControllerProcess(): Promise<ControllerProcess> {
   processStartedAt ??= observedProcessStartedAt(process.pid)
-    .then(value => value === null ? null : new Date(value).toISOString());
+    .then(value => value === null ? null : new Date(value).toISOString())
+    .then(value => { resolvedProcessStartedAt = value; return value; });
   return { bootId, pid: process.pid, hostHash, processStartedAt: await processStartedAt };
+}
+
+/**
+ * This process's identity without any I/O, for stamps written on the turn
+ * path. The start time is present only once an earlier call resolved it. A
+ * stamp without one still proves exit when its PID is gone in this PID space;
+ * a live PID then stays ambiguous, which fails closed.
+ */
+export function currentControllerProcessStamp(): ControllerProcess {
+  return { bootId, pid: process.pid, hostHash, processStartedAt: resolvedProcessStartedAt };
 }
 
 export function readControllerProcess(value: unknown): ControllerProcess | null {
