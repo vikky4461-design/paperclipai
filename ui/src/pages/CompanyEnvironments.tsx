@@ -2046,7 +2046,14 @@ export function CompanyEnvironments({ mode = "list" }: CompanyEnvironmentsProps)
             </Button>
           ) : null}
         </div>
-        {boardAccessLoaded && !canManageEnvironments ? (
+        {boardAccessView.kind === "error" && boardAccessView.errorKind !== "forbidden" ? (
+          <QueryErrorState
+            error={boardAccessQuery.error}
+            action="check your access"
+            onRetry={boardAccessView.retry}
+            retrying={boardAccessView.isFetching}
+          />
+        ) : (boardAccessLoaded && !canManageEnvironments) || boardAccessView.kind === "error" ? (
           <div className="text-xs text-muted-foreground" data-testid="environment-admin-note">
             {ENVIRONMENT_ADMIN_NOTE}
           </div>
