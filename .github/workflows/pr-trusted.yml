@@ -76,8 +76,6 @@ jobs:
           NPM_CONFIG_AUDIT: "false"
           NPM_CONFIG_FUND: "false"
           NPM_CONFIG_UPDATE_NOTIFIER: "false"
-        with:
-          version: 9.15.4
       - name: Restore dependencies for graph analysis
         if: steps.eligible.outputs.enabled == 'true'
         uses: ./.github/actions/setup-ci-dependencies
@@ -204,7 +202,6 @@ jobs:
           NPM_CONFIG_FUND: "false"
           NPM_CONFIG_UPDATE_NOTIFIER: "false"
         with:
-          version: 9.15.4
           run_install: false
 
       - name: Validate migration ordering against target branch
@@ -313,8 +310,6 @@ jobs:
           NPM_CONFIG_AUDIT: "false"
           NPM_CONFIG_FUND: "false"
           NPM_CONFIG_UPDATE_NOTIFIER: "false"
-        with:
-          version: 9.15.4
 
       # Share the checked-in lockfile key with master. PR merge refs must not
       # save full copies of the store or evict the post-merge build caches.
@@ -539,8 +534,6 @@ jobs:
           NPM_CONFIG_AUDIT: "false"
           NPM_CONFIG_FUND: "false"
           NPM_CONFIG_UPDATE_NOTIFIER: "false"
-        with:
-          version: 9.15.4
 
       # Share the checked-in lockfile key with master. PR merge refs must not
       # save full copies of the store or evict the post-merge build caches.
@@ -701,8 +694,6 @@ jobs:
           NPM_CONFIG_AUDIT: "false"
           NPM_CONFIG_FUND: "false"
           NPM_CONFIG_UPDATE_NOTIFIER: "false"
-        with:
-          version: 9.15.4
 
       # Share the checked-in lockfile key with master. PR merge refs must not
       # save full copies of the store or evict the post-merge build caches.
@@ -768,8 +759,6 @@ jobs:
           NPM_CONFIG_AUDIT: "false"
           NPM_CONFIG_FUND: "false"
           NPM_CONFIG_UPDATE_NOTIFIER: "false"
-        with:
-          version: 9.15.4
 
       # Share the checked-in lockfile key with master. PR merge refs must not
       # save full copies of the store or evict the post-merge build caches.
@@ -857,8 +846,6 @@ jobs:
           NPM_CONFIG_AUDIT: "false"
           NPM_CONFIG_FUND: "false"
           NPM_CONFIG_UPDATE_NOTIFIER: "false"
-        with:
-          version: 9.15.4
 
       # Share the checked-in lockfile key with master. PR merge refs must not
       # save full copies of the store or evict the post-merge build caches.
@@ -1092,8 +1079,6 @@ jobs:
           NPM_CONFIG_AUDIT: "false"
           NPM_CONFIG_FUND: "false"
           NPM_CONFIG_UPDATE_NOTIFIER: "false"
-        with:
-          version: 9.15.4
 
       # Share the checked-in lockfile key with master. PR merge refs must not
       # save full copies of the store or evict the post-merge build caches.
@@ -1356,8 +1341,6 @@ jobs:
           NPM_CONFIG_AUDIT: "false"
           NPM_CONFIG_FUND: "false"
           NPM_CONFIG_UPDATE_NOTIFIER: "false"
-        with:
-          version: 9.15.4
 
       # Share the checked-in lockfile key with master. PR merge refs must not
       # save full copies of the store or evict the post-merge build caches.
@@ -1452,8 +1435,6 @@ jobs:
           NPM_CONFIG_AUDIT: "false"
           NPM_CONFIG_FUND: "false"
           NPM_CONFIG_UPDATE_NOTIFIER: "false"
-        with:
-          version: 9.15.4
 
       # Share the checked-in lockfile key with master. PR merge refs must not
       # save full copies of the store or evict the post-merge build caches.
@@ -1670,8 +1651,6 @@ jobs:
           NPM_CONFIG_AUDIT: "false"
           NPM_CONFIG_FUND: "false"
           NPM_CONFIG_UPDATE_NOTIFIER: "false"
-        with:
-          version: 9.15.4
 
       # Share the checked-in lockfile key with master. PR merge refs must not
       # save full copies of the store or evict the post-merge build caches.
