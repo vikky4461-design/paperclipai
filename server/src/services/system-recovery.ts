@@ -56,8 +56,8 @@ export function exhaustedSystemRecoveryAction(state: SystemRecoveryState): strin
   const cause = state.failure?.cause ? `, cause: ${state.failure.cause.label}` : "";
   const reason = state.failure?.code ? ` (last failure: ${state.failure.code}${cause})` : "";
   return `Automatic recovery of saved work stopped after ${state.attempts} attempts${reason}. `
-    + "Retry recovery to export and merge from the retained sandbox again; no provider turn is submitted. "
-    + "If Retry keeps failing, inspect the run and its environment.";
+    + "Use Recover saved files (Try file recovery again after a failed attempt) to export and merge from the retained "
+    + "sandbox again; no provider turn is submitted. If file recovery keeps failing, inspect the run and its environment.";
 }
 
 /** CAS protects a newer manual generation from an old worker's late write.
