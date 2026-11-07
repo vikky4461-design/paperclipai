@@ -3092,7 +3092,8 @@ Recorded system recovery failures retain their original attempt and intent.
 When system workspace recovery exhausts its bounded attempts or deadline, the
 recovery action stays active and its owner changes from system to board. Its
 next action names the attempt count and last failure code and tells the board to
-use **Retry recovery**. The task blocker shows that same text. Retry starts one
+use **Recover saved files** (**Try file recovery again** after a failed attempt).
+The task blocker shows that same text. That action starts one
 new bounded system generation and returns ownership to the system. A sweep that
 finds an action already exhausted and still system-owned applies the same handoff
 as bookkeeping only; it grants no attempt. Exhaustion never submits a provider
